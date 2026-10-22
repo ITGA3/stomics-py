@@ -1,0 +1,30 @@
+name: Release
+
+# Tags v<version> the first time a version reaches main, so users can pin it:
+#   pip install "git+https://github.com/ITGA3/stomics-py@v0.1.0"
+# Bump `version` in pyproject.toml (and stomics/__init__.py) to cut a release.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Tag the version if it is new
+        run: |
+          version="$(grep -m1 '^version = ' pyproject.toml | cut -d'"' -f2)"
+          if [ -z "$version" ]; then echo "No version in pyproject.toml" >&2; exit 1; fi
+          if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
+            echo "v$version already tagged."
+          else
+            git tag "v$version"
+            git push origin "v$version"
+          fi

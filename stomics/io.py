@@ -9,7 +9,7 @@ def load_h5ad(path: str):
         import anndata as ad
     except ImportError as exc:  # pragma: no cover
         raise ImportError(  # pragma: no cover
-            'anndata is required to load .h5ad files. Install with: '
+            "anndata is required to load .h5ad files. Install with: "
             'pip install "stomics-py[anndata] @ git+https://github.com/ITGA3/stomics-py"'
         ) from exc
     return ad.read_h5ad(path)

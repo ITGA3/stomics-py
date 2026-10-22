@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) 2026 Stomics.io
+Copyright (c) 2026 The Allman Institute for Personalized Medicine
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
