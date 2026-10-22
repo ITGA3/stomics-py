@@ -120,9 +120,7 @@ def cmd_submit(args: argparse.Namespace) -> int:
     print(f"Submitting {dataset.accession} for review ...")
     updated = client.submit(dataset.accession)
     print(f"  Status: {updated.status}")
-    print(
-        f"\nDone. Dataset URL: {_site_url(base_url)}/datasets/{dataset.accession}"
-    )
+    print(f"\nDone. Dataset URL: {_site_url(base_url)}/datasets/{dataset.accession}")
     return 0
 
 
