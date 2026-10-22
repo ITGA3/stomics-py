@@ -1,7 +1,7 @@
 name: Release
 
 # Tags v<version> the first time a version reaches main, so users can pin it:
-#   pip install "git+https://github.com/ITGA3/stomics-py@v0.1.0"
+#   pip install "git+https://github.com/ITGA3/stomics-py@v0.1.1"
 # Bump `version` in pyproject.toml (and stomics/__init__.py) to cut a release.
 
 on:

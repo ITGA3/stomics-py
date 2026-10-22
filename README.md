@@ -13,7 +13,7 @@ pip install "git+https://github.com/ITGA3/stomics-py"
 # with AnnData support
 pip install "stomics-py[anndata] @ git+https://github.com/ITGA3/stomics-py"
 # a specific release
-pip install "git+https://github.com/ITGA3/stomics-py@v0.1.0"
+pip install "git+https://github.com/ITGA3/stomics-py@v0.1.1"
 ```
 
 ## Quick start

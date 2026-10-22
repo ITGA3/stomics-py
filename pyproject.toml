@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stomics-py"
-version = "0.1.0"
+version = "0.1.1"
 description = "Python client SDK for the Stomics.io spatial transcriptomics data portal"
 readme = "README.md"
 # X | None annotations are evaluated at import time, so 3.10 is the floor.
