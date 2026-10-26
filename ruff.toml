@@ -1,0 +1,32 @@
+# Lint and format configuration. Run with `ruff check .` and `ruff format --check .`;
+# both run in CI.
+
+line-length = 100
+target-version = "py310"  # the oldest Python requires-python allows
+
+[lint]
+# Chosen to catch real defects rather than to enforce a house style.
+select = [
+    "F",     # pyflakes
+    "E4",    # import placement
+    "E7",    # comparison and statement errors
+    "E9",    # syntax and IO errors
+    "I",     # import sorting
+    "B",     # bugbear
+    "S",     # bandit
+    "RUF",   # ruff's own correctness rules
+]
+ignore = [
+    "E501",                        # line length is the formatter's job
+    "S110",                        # best-effort optional steps (spatial attach) use try/except/pass
+    "RUF001", "RUF002", "RUF003",  # typographic characters in prose
+    "S105", "S107",                # placeholder keys in examples are not credentials
+    "B007", "RUF059",              # intentionally unused loop and unpacking variables
+]
+
+[lint.per-file-ignores]
+"tests/**" = [
+    "S101",  # assert is the point
+    "S106",  # fake credentials in fixtures
+    "S108",  # temporary paths in fixtures
+]

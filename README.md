@@ -13,7 +13,7 @@ pip install "git+https://github.com/ITGA3/stomics-py"
 # with AnnData support
 pip install "stomics-py[anndata] @ git+https://github.com/ITGA3/stomics-py"
 # a specific release
-pip install "git+https://github.com/ITGA3/stomics-py@v0.1.0"
+pip install "git+https://github.com/ITGA3/stomics-py@v0.1.1"
 ```
 
 ## Quick start
@@ -50,9 +50,9 @@ pytest
 
 ## Support
 
-Report bugs in this repository's issues or write to support@stomics.io. This repository is published
-automatically from the Stomics.io source, so changes are made there rather than by pull request here.
+Report bugs in this repository's issues or write to support@stomics.io. Pull requests are welcome;
+CI must pass, including the 100% test coverage gate.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. Copyright (c) 2026 The Allman Institute for Personalized Medicine. See [LICENSE](LICENSE).
