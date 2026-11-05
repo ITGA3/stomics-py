@@ -405,7 +405,15 @@ class StomicsClient:
 
         Returns
         -------
-        :class:`pandas.DataFrame` with columns ``x``, ``y``, and ``expression``.
+        :class:`pandas.DataFrame` with one row per spot or cell: ``x``, ``y``,
+        ``expression``, plus the API's ``value`` (the same number, the name
+        earlier releases returned), ``barcode`` and ``cell_type``. Values are
+        ``log1p`` of counts per 10,000 when the submitted matrix holds raw
+        counts, and as submitted otherwise; ``x``/``y`` are in the submitted
+        coordinate units.
+
+        Raises :class:`requests.HTTPError` with status 409 while the dataset's
+        expression has not been processed, and 404 for a gene not in it.
         """
         import pandas as pd
 
@@ -413,7 +421,12 @@ class StomicsClient:
         if sample_id is not None:
             params["sample_id"] = sample_id
         data = self._get(f"/api/v1/datasets/{accession}/expression", params=params)
-        return pd.DataFrame(data.get("spots", []))
+        df = pd.DataFrame(data.get("spots", []))
+        if df.empty:
+            return pd.DataFrame(columns=["x", "y", "expression"])
+        if "value" in df.columns and "expression" not in df.columns:
+            df.insert(2, "expression", df["value"])
+        return df
 
     def load_anndata(
         self,

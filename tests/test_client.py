@@ -516,13 +516,26 @@ def test_get_expression(client):
         f"{BASE}/api/v1/datasets/STD0001/expression",
         json={
             "spots": [
-                {"x": 1, "y": 2, "expression": 3.5},
-                {"x": 3, "y": 4, "expression": 0.0},
+                {"x": 1, "y": 2, "value": 3.5, "barcode": "a", "cell_type": "t"},
+                {"x": 3, "y": 4, "value": 0.0, "barcode": "b", "cell_type": "t"},
             ]
         },
     )
     df = client.get_expression("STD0001", gene="BRCA1")
     assert len(df) == 2
+    assert list(df.columns)[:3] == ["x", "y", "expression"]
+    assert df["expression"].tolist() == [3.5, 0.0]
+    assert df["value"].tolist() == [3.5, 0.0]
+
+
+@resp_lib.activate
+def test_get_expression_passes_through_an_expression_column(client):
+    resp_lib.add(
+        resp_lib.GET,
+        f"{BASE}/api/v1/datasets/STD0001/expression",
+        json={"spots": [{"x": 1, "y": 2, "expression": 3.5}]},
+    )
+    df = client.get_expression("STD0001", gene="BRCA1")
     assert list(df.columns) == ["x", "y", "expression"]
 
 

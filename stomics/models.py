@@ -405,7 +405,8 @@ class TeamList:
 class GeneSearchResult:
     dataset_accession: str
     dataset_title: str
-    sample_id: int
+    # None for a dataset-level expression store (a dataset with no samples).
+    sample_id: int | None
     mean_expr: float
     pct_spots_expressed: float
     max_expr: float
