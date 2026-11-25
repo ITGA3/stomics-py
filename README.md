@@ -26,6 +26,11 @@ for ds in client.search(organism="Homo sapiens", per_page=10):
     print(ds.accession, ds.title)
 
 adata = client.load_anndata("STD0100")
+
+# What the processed expression holds, then any per-spot field and raw counts
+manifest = client.expression_manifest("STD0100")
+clusters = client.get_obs("STD0100", "leiden")
+counts = client.get_expression("STD0100", gene="GAPDH", layer="counts")
 ```
 
 Create an API key at <https://stomics.io/account/api-keys> for anything tied to your account, such as
