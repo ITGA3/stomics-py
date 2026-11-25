@@ -3300,3 +3300,45 @@ def test_list_vocabulary_terms_with_query(client):
 def test_list_vocabulary_rejects_unknown_kind(client):
     with pytest.raises(ValueError, match="kind must be one of"):
         client.list_vocabulary("species")
+
+
+@resp_lib.activate
+def test_get_expression_counts_layer(client):
+    resp_lib.add(resp_lib.GET, f"{BASE}/api/v1/datasets/STD0001/expression", json={"spots": []})
+    client.get_expression("STD0001", gene="TP53")
+    client.get_expression("STD0001", gene="TP53", layer="counts")
+    assert "layer" not in resp_lib.calls[0].request.url
+    assert "layer=counts" in resp_lib.calls[1].request.url
+
+
+@resp_lib.activate
+def test_expression_manifest(client):
+    manifest = {"layers": ["normalised", "counts"], "obs": [{"key": "leiden"}]}
+    resp_lib.add(resp_lib.GET, f"{BASE}/api/v1/datasets/STD0001/expression/manifest", json=manifest)
+    assert client.expression_manifest("STD0001") == manifest
+    client.expression_manifest("STD0001", sample_id="4")
+    assert resp_lib.calls[0].request.url.endswith("/expression/manifest")
+    assert "sample_id=4" in resp_lib.calls[1].request.url
+
+
+@resp_lib.activate
+def test_get_obs_categorical_and_numeric(client):
+    url = f"{BASE}/api/v1/datasets/STD0001/expression/obs"
+    resp_lib.add(
+        resp_lib.GET,
+        url,
+        json={"field": {"kind": "categorical"}, "barcodes": ["a", "b"], "values": ["0", "1"]},
+    )
+    resp_lib.add(
+        resp_lib.GET,
+        url,
+        json={"field": {"kind": "numeric"}, "barcodes": ["a", "b"], "values": [1.5, None]},
+    )
+    df = client.get_obs("STD0001", "leiden")
+    assert list(df.columns) == ["barcode", "leiden"]
+    assert df["leiden"].tolist() == ["0", "1"]
+    df = client.get_obs("STD0001", "qc:n_counts", sample_id="4")
+    assert df["qc:n_counts"].iloc[0] == 1.5
+    assert df["qc:n_counts"].isna().iloc[1]
+    assert "key=qc%3An_counts" in resp_lib.calls[1].request.url
+    assert "sample_id=4" in resp_lib.calls[1].request.url

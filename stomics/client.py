@@ -394,6 +394,7 @@ class StomicsClient:
         accession: str,
         gene: str,
         sample_id: Optional[str] = None,
+        layer: str = "normalised",
     ):
         """Fetch per-spot expression values for a single gene.
 
@@ -402,6 +403,9 @@ class StomicsClient:
         accession:  Dataset accession.
         gene:       Gene symbol, e.g. ``"BRCA1"``.
         sample_id:  Restrict to a specific sample (optional).
+        layer:      ``"normalised"`` (the default) or ``"counts"``: raw integer
+                    counts, for datasets whose :meth:`expression_manifest`
+                    lists that layer. Other datasets answer 409.
 
         Returns
         -------
@@ -420,6 +424,8 @@ class StomicsClient:
         params: dict = {"gene": gene}
         if sample_id is not None:
             params["sample_id"] = sample_id
+        if layer != "normalised":
+            params["layer"] = layer
         data = self._get(f"/api/v1/datasets/{accession}/expression", params=params)
         df = pd.DataFrame(data.get("spots", []))
         if df.empty:
@@ -427,6 +433,51 @@ class StomicsClient:
         if "value" in df.columns and "expression" not in df.columns:
             df.insert(2, "expression", df["value"])
         return df
+
+    def expression_manifest(self, accession: str, sample_id: Optional[str] = None) -> dict:
+        """What a dataset's processed expression holds.
+
+        Returns the manifest as a dict: ``layers`` (``normalised``, plus
+        ``counts`` when the submitted matrix was raw counts), ``transform``,
+        ``n_spots``, ``n_genes``, ``obs`` (one entry per per-spot metadata
+        field: ``key``, ``name``, ``kind`` categorical or numeric, ``source``
+        submitted or qc, and its categories or range), ``label_columns`` and
+        ``embeddings``. Pass any ``obs`` key to :meth:`get_obs`.
+
+        Raises :class:`requests.HTTPError` with status 409 while the dataset's
+        expression has not been processed.
+        """
+        params = {"sample_id": sample_id} if sample_id is not None else None
+        return self._get(f"/api/v1/datasets/{accession}/expression/manifest", params=params)
+
+    def get_obs(self, accession: str, key: str, sample_id: Optional[str] = None):
+        """Every spot's value of one metadata field.
+
+        Parameters
+        ----------
+        accession:  Dataset accession.
+        key:        A field key from :meth:`expression_manifest`: a submitted
+                    obs column such as ``"leiden"``, or computed QC
+                    (``"qc:n_genes"``, ``"qc:n_counts"``, ``"qc:pct_mt"``,
+                    ``"qc:pct_ribo"``).
+        sample_id:  Restrict to a specific sample (optional).
+
+        Returns
+        -------
+        :class:`pandas.DataFrame` with ``barcode`` and a column named ``key``.
+        Categorical fields are strings; numeric ones floats, NaN where a spot
+        has no value. Raises :class:`requests.HTTPError` 404 for an unknown key.
+        """
+        import pandas as pd
+
+        params: dict = {"key": key}
+        if sample_id is not None:
+            params["sample_id"] = sample_id
+        data = self._get(f"/api/v1/datasets/{accession}/expression/obs", params=params)
+        values = data.get("values", [])
+        if data.get("field", {}).get("kind") == "numeric":
+            values = [float("nan") if v is None else v for v in values]
+        return pd.DataFrame({"barcode": data.get("barcodes", []), key: values})
 
     def load_anndata(
         self,
