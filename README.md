@@ -31,6 +31,10 @@ adata = client.load_anndata("STD0100")
 manifest = client.expression_manifest("STD0100")
 clusters = client.get_obs("STD0100", "leiden")
 counts = client.get_expression("STD0100", gene="GAPDH", layer="counts")
+
+# Files: filter by name, type or sample, or download them all, resuming if interrupted
+matrices = client.list_files("STD0716", q="GSM5", file_types=["expression_matrix"])
+client.download_dataset("STD0716", "./STD0716")
 ```
 
 Create an API key at <https://stomics.io/account/api-keys> for anything tied to your account, such as

@@ -66,6 +66,8 @@ VOCABULARY_KINDS = ("technology", "organism", "tissue", "disease")
 
 # Used for bulk transfers, which can legitimately stall longer between chunks.
 TRANSFER_TIMEOUT = (10, 300)
+# The paged file listing's largest page.
+FILES_PER_PAGE = 200
 
 
 class _TimeoutSession(requests.Session):
@@ -300,25 +302,148 @@ class StomicsClient:
         data = self._get(f"/api/v1/datasets/{accession}/versions")
         return [self._build_dataset_version(v) for v in data.get("versions", [])]
 
-    def list_files(self, accession: str, version: Optional[int] = None) -> List[File]:
-        """List all files for a dataset, including pre-signed download URLs.
+    def list_files(
+        self,
+        accession: str,
+        version: Optional[int] = None,
+        q: Optional[str] = None,
+        file_types: Optional[Sequence[str]] = None,
+        sample_id: Optional[int] = None,
+    ) -> List[File]:
+        """List a dataset's files, including pre-signed download URLs.
 
         Parameters
         ----------
-        accession:  Dataset accession.
-        version:    Return files from a specific version snapshot. When ``None``
-                    (default), returns the current files.
+        accession:   Dataset accession.
+        version:     Return files from a specific version snapshot. When ``None``
+                     (default), returns the current files.
+        q:           Only files whose name contains this, ignoring case, e.g. a GEO
+                     sample accession such as ``"GSM5"``.
+        file_types:  Only these types, e.g. ``["expression_matrix", "tissue_image"]``.
+        sample_id:   Only the files of this sample.
 
         Returns
         -------
         List of :class:`File` objects. Each file's ``download_url`` attribute
         contains a pre-signed S3 URL valid for 1 hour.
         """
+        if q or file_types or sample_id is not None:
+            return list(self._iter_files(accession, version, q, file_types, sample_id))
         params: dict = {}
         if version is not None:
             params["version"] = version
         data = self._get(f"/api/v1/datasets/{accession}/files", params=params or None)
         return [self._build_file(f) for f in data]
+
+    def _iter_files(
+        self,
+        accession: str,
+        version: Optional[int] = None,
+        q: Optional[str] = None,
+        file_types: Optional[Sequence[str]] = None,
+        sample_id: Optional[int] = None,
+    ):
+        """Yield every file matching the filters, a page of the paged listing at a time."""
+        page = 1
+        while True:
+            params: dict = {"page": page, "per_page": FILES_PER_PAGE}
+            if version is not None:
+                params["version"] = version
+            if q:
+                params["q"] = q
+            if file_types:
+                params["file_type"] = list(file_types)
+            if sample_id is not None:
+                params["sample_id"] = sample_id
+            data = self._get(f"/api/v1/datasets/{accession}/files/page", params=params)
+            for f in data["items"]:
+                yield self._build_file(f)
+            if page * data["per_page"] >= data["total"]:
+                return
+            page += 1
+
+    def download_dataset(
+        self,
+        accession: str,
+        dest_dir: Union[str, Path],
+        file_types: Optional[Sequence[str]] = None,
+        q: Optional[str] = None,
+        sample_id: Optional[int] = None,
+        show_progress: bool = True,
+    ) -> List[Path]:
+        """Download every file of a dataset, or those matching filters, into a directory.
+
+        Suited to datasets too large for a ZIP bundle (over 100 GB) and to
+        interrupted runs: a file already on disk at its full size is skipped,
+        and a partial download (``<name>.part``) resumes where it stopped.
+        Each file gets a fresh download link just before it starts, so a run
+        longer than a link's hour of validity still works.
+
+        Parameters
+        ----------
+        accession:      Dataset accession.
+        dest_dir:       Directory to write into; created if missing.
+        file_types:     Only these types (see :meth:`list_files`).
+        q:              Only files whose name contains this, ignoring case.
+        sample_id:      Only the files of this sample.
+        show_progress:  Display a ``tqdm`` progress bar per file (requires ``tqdm``).
+
+        Returns
+        -------
+        The path of every file, downloaded now or found complete.
+
+        Examples
+        --------
+        >>> client.download_dataset("STD0716", "./STD0716", file_types=["expression_matrix"])
+        """
+        dest = Path(dest_dir)
+        dest.mkdir(parents=True, exist_ok=True)
+        seen: set = set()
+        paths: List[Path] = []
+        for f in self._iter_files(accession, None, q, file_types, sample_id):
+            # Two samples can carry files of the same name; keep both.
+            name = f.filename if f.filename not in seen else f"{f.id}_{f.filename}"
+            seen.add(name)
+            path = dest / name
+            paths.append(path)
+            if f.size_bytes is not None and path.exists() and path.stat().st_size == f.size_bytes:
+                continue
+            data = self._get(f"/api/v1/datasets/{accession}/files/{f.id}/download")
+            self._resume_to_disk(data["url"], path, show_progress=show_progress)
+        return paths
+
+    def _resume_to_disk(self, url: str, path: Path, show_progress: bool = True) -> None:
+        """Download to ``<path>.part``, continuing a partial one, then rename into place."""
+        part = path.with_name(path.name + ".part")
+        have = part.stat().st_size if part.exists() else 0
+        headers = {"Range": f"bytes={have}-"} if have else {}
+        with requests.get(url, stream=True, timeout=TRANSFER_TIMEOUT, headers=headers) as resp:
+            if resp.status_code == 416:  # the part file is already complete
+                part.replace(path)
+                return
+            resp.raise_for_status()
+            # 206 continues the part file; a 200 means the server sent it whole.
+            mode = "ab" if resp.status_code == 206 else "wb"
+            total = int(resp.headers.get("content-length", 0))
+            with open(part, mode) as fh:
+                self._write_chunks(resp, fh, total, show_progress)
+        part.replace(path)
+
+    @staticmethod
+    def _write_chunks(resp, fh, total: int, show_progress: bool) -> None:
+        if show_progress:
+            try:
+                from tqdm import tqdm
+            except ImportError:
+                show_progress = False
+        if not show_progress:
+            for chunk in resp.iter_content(chunk_size=1024 * 1024):
+                fh.write(chunk)
+            return
+        with tqdm(total=total or None, unit="B", unit_scale=True) as bar:
+            for chunk in resp.iter_content(chunk_size=1024 * 1024):
+                fh.write(chunk)
+                bar.update(len(chunk))
 
     def download_file(
         self,
