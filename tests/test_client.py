@@ -3519,3 +3519,59 @@ def test_get_obs_categorical_and_numeric(client):
     assert df["qc:n_counts"].isna().iloc[1]
     assert "key=qc%3An_counts" in resp_lib.calls[1].request.url
     assert "sample_id=4" in resp_lib.calls[1].request.url
+
+
+# ---------------------------------------------------------------------------
+# Team logos
+# ---------------------------------------------------------------------------
+
+_LOGO_URL = f"{_TEAM_SLUG_URL}/logo"
+
+
+def test_build_team_reads_logo_url(client):
+    assert client._build_team(_TEAM_JSON).logo_url is None
+    team = client._build_team({**_TEAM_JSON, "logo_url": "/api/v1/teams/smith-lab/logo?v=abc"})
+    assert team.logo_url == "/api/v1/teams/smith-lab/logo?v=abc"
+
+
+@resp_lib.activate
+def test_set_team_logo_puts_the_file(client, tmp_path):
+    logo = tmp_path / "logo.svg"
+    logo.write_bytes(b"<svg xmlns='http://www.w3.org/2000/svg'/>")
+    with_logo = {**_TEAM_JSON, "logo_url": "/api/v1/teams/smith-lab/logo?v=abc"}
+    resp_lib.add(resp_lib.PUT, _LOGO_URL, json=with_logo, status=200)
+    team = client.set_team_logo("smith-lab", str(logo))
+    assert team.logo_url.endswith("?v=abc")
+    request = resp_lib.calls[0].request
+    assert b'name="file"; filename="logo.svg"' in request.body
+    assert b"Content-Type: image/svg+xml" in request.body
+
+
+@resp_lib.activate
+def test_set_team_logo_unknown_extension_is_octet_stream(client, tmp_path):
+    logo = tmp_path / "logo"
+    logo.write_bytes(b"\x89PNG")
+    resp_lib.add(resp_lib.PUT, _LOGO_URL, json=_TEAM_JSON, status=200)
+    client.set_team_logo("smith-lab", str(logo))
+    assert b"Content-Type: application/octet-stream" in resp_lib.calls[0].request.body
+
+
+@resp_lib.activate
+def test_set_team_logo_422_raises(client, tmp_path):
+    logo = tmp_path / "logo.gif"
+    logo.write_bytes(b"GIF89a")
+    resp_lib.add(
+        resp_lib.PUT,
+        _LOGO_URL,
+        json={"detail": "Logos must be PNG, JPEG, WebP or SVG images."},
+        status=422,
+    )
+    with pytest.raises(requests.HTTPError):
+        client.set_team_logo("smith-lab", str(logo))
+
+
+@resp_lib.activate
+def test_delete_team_logo(client):
+    resp_lib.add(resp_lib.DELETE, _LOGO_URL, json={**_TEAM_JSON, "logo_url": None}, status=200)
+    assert client.delete_team_logo("smith-lab").logo_url is None
+    assert resp_lib.calls[0].request.method == "DELETE"

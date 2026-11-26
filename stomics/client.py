@@ -1,3 +1,4 @@
+import mimetypes
 import os
 from pathlib import Path
 from typing import List, Optional, Sequence, Union
@@ -1806,6 +1807,7 @@ class StomicsClient:
             member_count=data.get("member_count", 0),
             dataset_count=data.get("dataset_count", 0),
             description=data.get("description"),
+            logo_url=data.get("logo_url"),
         )
 
     def _build_team_member(self, data: dict) -> TeamMember:
@@ -1935,6 +1937,49 @@ class StomicsClient:
         """
         resp = self._session.delete(f"{self.base_url}/api/v1/teams/{slug}")
         resp.raise_for_status()
+
+    def set_team_logo(self, slug: str, path: str) -> Team:
+        """Upload or replace a team's logo (team owner or admin).
+
+        Parameters
+        ----------
+        slug:
+            Team slug.
+        path:
+            A PNG, JPEG, WebP or SVG file of at most 1 MB and 4096 pixels on a
+            side. The server decides the type from the file's contents; any
+            shape is accepted and shown fitted inside a square.
+
+        Returns
+        -------
+        :class:`Team`
+            The team, with ``logo_url`` pointing at the new image.
+
+        Examples
+        --------
+        >>> team = client.set_team_logo("smith-lab", "logo.svg")
+        >>> client.base_url + team.logo_url
+        """
+        mime = mimetypes.guess_type(path)[0] or "application/octet-stream"
+        with open(path, "rb") as fh:
+            resp = self._session.put(
+                f"{self.base_url}/api/v1/teams/{slug}/logo",
+                files={"file": (Path(path).name, fh, mime)},
+            )
+        resp.raise_for_status()
+        return self._build_team(resp.json())
+
+    def delete_team_logo(self, slug: str) -> Team:
+        """Remove a team's logo (team owner or admin).
+
+        Returns
+        -------
+        :class:`Team`
+            The team, with ``logo_url`` set to None.
+        """
+        resp = self._session.delete(f"{self.base_url}/api/v1/teams/{slug}/logo")
+        resp.raise_for_status()
+        return self._build_team(resp.json())
 
     def list_team_members(self, slug: str) -> List[TeamMember]:
         """List accepted and pending members of a team.

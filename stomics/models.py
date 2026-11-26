@@ -391,6 +391,9 @@ class Team:
     member_count: int
     dataset_count: int
     description: str | None = None
+    # Path on the API origin (prefix ``client.base_url``), changing with each
+    # upload; None when the team has no logo.
+    logo_url: str | None = None
 
 
 @dataclass
