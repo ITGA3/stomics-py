@@ -279,6 +279,183 @@ def test_list_files_empty(client):
     assert client.list_files("STD0001") == []
 
 
+def _file(fid, name, size=None):
+    return {
+        "id": fid,
+        "dataset_id": 1,
+        "filename": name,
+        "file_type": "expression_matrix",
+        "upload_status": "complete",
+        "created_at": "2025-01-01T00:00:00Z",
+        "size_bytes": size,
+    }
+
+
+def _page(items, total, page=1, per_page=200):
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "total_bytes": 0,
+        "type_counts": {},
+        "bundle_max_bytes": 100 * 1024**3,
+    }
+
+
+PAGE_URL = f"{BASE}/api/v1/datasets/STD0001/files/page"
+
+
+@resp_lib.activate
+def test_list_files_with_filters_walks_the_pages(client):
+    resp_lib.add(
+        resp_lib.GET,
+        PAGE_URL,
+        json=_page([_file(1, "GSM1_a.h5")], total=2, per_page=1),
+        match=[
+            resp_lib.matchers.query_param_matcher(
+                {
+                    "page": "1",
+                    "per_page": "200",
+                    "q": "GSM1",
+                    "file_type": ["expression_matrix", "image"],
+                    "sample_id": "7",
+                    "version": "2",
+                }
+            )
+        ],
+    )
+    resp_lib.add(
+        resp_lib.GET,
+        PAGE_URL,
+        json=_page([_file(2, "GSM1_b.h5")], total=2, page=2, per_page=1),
+        match=[
+            resp_lib.matchers.query_param_matcher(
+                {
+                    "page": "2",
+                    "per_page": "200",
+                    "q": "GSM1",
+                    "file_type": ["expression_matrix", "image"],
+                    "sample_id": "7",
+                    "version": "2",
+                }
+            )
+        ],
+    )
+    files = client.list_files(
+        "STD0001", version=2, q="GSM1", file_types=["expression_matrix", "image"], sample_id=7
+    )
+    assert [f.filename for f in files] == ["GSM1_a.h5", "GSM1_b.h5"]
+
+
+@resp_lib.activate
+def test_download_dataset_downloads_skips_and_resumes(client, tmp_path):
+    dest = tmp_path / "STD0001"
+    dest.mkdir()
+    (dest / "done.csv").write_bytes(b"12345")  # complete: skipped
+    (dest / "half.csv.part").write_bytes(b"abc")  # partial: resumed
+    files = [
+        _file(1, "done.csv", 5),
+        _file(2, "half.csv", 6),
+        _file(3, "new.csv", 3),
+        _file(4, "new.csv", 2),  # the same name from another sample
+    ]
+    resp_lib.add(
+        resp_lib.GET,
+        PAGE_URL,
+        json=_page(files, total=4),
+        match=[
+            resp_lib.matchers.query_param_matcher(
+                {"page": "1", "per_page": "200", "file_type": "expression_matrix"}
+            )
+        ],
+    )
+    for fid in (2, 3, 4):
+        resp_lib.add(
+            resp_lib.GET,
+            f"{BASE}/api/v1/datasets/STD0001/files/{fid}/download",
+            json={"url": f"https://s3.example.com/{fid}"},
+        )
+    resp_lib.add(
+        resp_lib.GET,
+        "https://s3.example.com/2",
+        body=b"def",
+        status=206,
+        match=[resp_lib.matchers.header_matcher({"Range": "bytes=3-"})],
+    )
+    resp_lib.add(resp_lib.GET, "https://s3.example.com/3", body=b"new")
+    resp_lib.add(resp_lib.GET, "https://s3.example.com/4", body=b"n2")
+
+    paths = client.download_dataset(
+        "STD0001", dest, file_types=["expression_matrix"], show_progress=False
+    )
+
+    assert [p.name for p in paths] == ["done.csv", "half.csv", "new.csv", "4_new.csv"]
+    assert (dest / "half.csv").read_bytes() == b"abcdef"
+    assert (dest / "new.csv").read_bytes() == b"new"
+    assert (dest / "4_new.csv").read_bytes() == b"n2"
+    assert not (dest / "half.csv.part").exists()
+    downloads = [c.request.url for c in resp_lib.calls if "/files/1/download" in c.request.url]
+    assert downloads == []
+
+
+@resp_lib.activate
+def test_download_dataset_restarts_when_the_server_ignores_range(client, tmp_path):
+    (tmp_path / "a.csv.part").write_bytes(b"stale")
+    resp_lib.add(resp_lib.GET, PAGE_URL, json=_page([_file(1, "a.csv")], total=1))
+    resp_lib.add(
+        resp_lib.GET,
+        f"{BASE}/api/v1/datasets/STD0001/files/1/download",
+        json={"url": "https://s3.example.com/1"},
+    )
+    resp_lib.add(resp_lib.GET, "https://s3.example.com/1", body=b"whole")
+    client.download_dataset("STD0001", tmp_path, q="a", show_progress=False)
+    assert (tmp_path / "a.csv").read_bytes() == b"whole"
+
+
+@resp_lib.activate
+def test_download_dataset_finishes_a_complete_part_file(client, tmp_path):
+    (tmp_path / "a.csv.part").write_bytes(b"all")
+    resp_lib.add(resp_lib.GET, PAGE_URL, json=_page([_file(1, "a.csv")], total=1))
+    resp_lib.add(
+        resp_lib.GET,
+        f"{BASE}/api/v1/datasets/STD0001/files/1/download",
+        json={"url": "https://s3.example.com/1"},
+    )
+    resp_lib.add(resp_lib.GET, "https://s3.example.com/1", status=416)
+    client.download_dataset("STD0001", tmp_path, sample_id=3, show_progress=False)
+    assert (tmp_path / "a.csv").read_bytes() == b"all"
+
+
+@resp_lib.activate
+def test_download_dataset_progress_bar_and_its_absence(client, tmp_path):
+    resp_lib.add(resp_lib.GET, PAGE_URL, json=_page([_file(1, "a.csv")], total=1))
+    resp_lib.add(
+        resp_lib.GET,
+        f"{BASE}/api/v1/datasets/STD0001/files/1/download",
+        json={"url": "https://s3.example.com/1"},
+    )
+    resp_lib.add(resp_lib.GET, "https://s3.example.com/1", body=b"xy")
+    bar = MagicMock()
+    fake_tqdm = MagicMock()
+    fake_tqdm.tqdm.return_value.__enter__ = MagicMock(return_value=bar)
+    fake_tqdm.tqdm.return_value.__exit__ = MagicMock(return_value=False)
+    with patch.dict("sys.modules", {"tqdm": fake_tqdm}):
+        client.download_dataset("STD0001", tmp_path / "one", q="a")
+    bar.update.assert_called_with(2)
+    with patch.dict("sys.modules", {"tqdm": None}):
+        client.download_dataset("STD0001", tmp_path / "two", q="a")
+    assert (tmp_path / "two" / "a.csv").read_bytes() == b"xy"
+
+
+@resp_lib.activate
+def test_download_dataset_raises_on_a_refused_link(client, tmp_path):
+    resp_lib.add(resp_lib.GET, PAGE_URL, json=_page([_file(1, "a.csv")], total=1))
+    resp_lib.add(resp_lib.GET, f"{BASE}/api/v1/datasets/STD0001/files/1/download", status=403)
+    with pytest.raises(requests.HTTPError):
+        client.download_dataset("STD0001", tmp_path, q="a", show_progress=False)
+
+
 # ===========================================================================
 # download_file
 # ===========================================================================
