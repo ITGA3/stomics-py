@@ -610,12 +610,7 @@ class StomicsClient:
     # ------------------------------------------------------------------
 
     def _analysis(self, accession: str, path: str, sample_id, **params) -> dict:
-        query = {k: v for k, v in params.items() if v is not None}
-        if sample_id is not None:
-            query["sample_id"] = sample_id
-        return self._get(
-            f"/api/v1/datasets/{accession}/analysis/standard{path}", params=query or None
-        )
+        return self._analysis_path(accession, f"standard{path}", sample_id, **params)
 
     def get_standard_analysis(self, accession: str, sample_id: Optional[str] = None) -> dict:
         """Whether a sample has results from the stomics.io standard pipeline.
