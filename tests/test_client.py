@@ -3522,6 +3522,77 @@ def test_get_obs_categorical_and_numeric(client):
 
 
 # ---------------------------------------------------------------------------
+# The standard analysis pipeline
+# ---------------------------------------------------------------------------
+
+ANALYSIS = f"{BASE}/api/v1/datasets/STD0001/analysis/standard"
+
+
+@resp_lib.activate
+def test_get_standard_analysis(client):
+    resp_lib.add(resp_lib.GET, ANALYSIS, json={"status": "ready", "resolutions": [1.0]})
+    assert client.get_standard_analysis("STD0001")["status"] == "ready"
+    client.get_standard_analysis("STD0001", sample_id="4")
+    assert resp_lib.calls[0].request.url == ANALYSIS
+    assert resp_lib.calls[1].request.url.endswith("?sample_id=4")
+
+
+@resp_lib.activate
+def test_get_markers(client):
+    marker = {
+        "cluster": "0",
+        "rank": 1,
+        "gene": "Gfap",
+        "score": 9.0,
+        "log_fold_change": 2.0,
+        "pval_adj": 0.001,
+        "pct_in": 0.9,
+        "pct_out": 0.1,
+    }
+    resp_lib.add(resp_lib.GET, f"{ANALYSIS}/markers", json={"markers": [marker]})
+    df = client.get_markers("STD0001", sample_id="4", resolution=0.6, cluster="0", limit=5)
+    assert df["gene"].tolist() == ["Gfap"]
+    url = resp_lib.calls[0].request.url
+    assert (
+        "resolution=0.6" in url and "cluster=0" in url and "limit=5" in url and "sample_id=4" in url
+    )
+    client.get_markers("STD0001")
+    assert "cluster" not in resp_lib.calls[1].request.url
+
+
+@resp_lib.activate
+def test_get_dotplot(client):
+    resp_lib.add(
+        resp_lib.GET,
+        f"{ANALYSIS}/dotplot",
+        json={
+            "genes": ["Gfap"],
+            "clusters": ["0", "1"],
+            "mean": [[2.0, 0.1]],
+            "fraction": [[0.9, 0.2]],
+        },
+    )
+    mean, fraction = client.get_dotplot("STD0001", resolution=1.5)
+    assert mean.loc["Gfap", "0"] == 2.0
+    assert fraction.loc["Gfap", "1"] == 0.2
+    assert "resolution=1.5" in resp_lib.calls[0].request.url
+
+
+@resp_lib.activate
+def test_get_spatially_variable_genes(client):
+    resp_lib.add(
+        resp_lib.GET,
+        f"{ANALYSIS}/spatially-variable",
+        json={"genes": [{"gene": "Pcp4", "rank": 1, "moran_i": 0.7, "pval_adj": 1e-9}]},
+    )
+    df = client.get_spatially_variable_genes("STD0001", sample_id="4", limit=20, offset=20)
+    assert df["gene"].tolist() == ["Pcp4"]
+    assert (
+        "limit=20" in resp_lib.calls[0].request.url and "offset=20" in resp_lib.calls[0].request.url
+    )
+
+
+# ---------------------------------------------------------------------------
 # Team logos
 # ---------------------------------------------------------------------------
 

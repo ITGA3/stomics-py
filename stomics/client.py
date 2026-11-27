@@ -605,6 +605,94 @@ class StomicsClient:
             values = [float("nan") if v is None else v for v in values]
         return pd.DataFrame({"barcode": data.get("barcodes", []), key: values})
 
+    # ------------------------------------------------------------------
+    # The standard analysis pipeline
+    # ------------------------------------------------------------------
+
+    def _analysis(self, accession: str, path: str, sample_id, **params) -> dict:
+        query = {k: v for k, v in params.items() if v is not None}
+        if sample_id is not None:
+            query["sample_id"] = sample_id
+        return self._get(
+            f"/api/v1/datasets/{accession}/analysis/standard{path}", params=query or None
+        )
+
+    def get_standard_analysis(self, accession: str, sample_id: Optional[str] = None) -> dict:
+        """Whether a sample has results from the stomics.io standard pipeline.
+
+        Returns a dict with ``status`` (``ready``, ``not_run``, ``pending``,
+        ``running``, ``failed`` or ``unsupported``, with ``error``) and, when
+        ready, ``provenance`` (method, version, parameters, when it ran),
+        ``resolutions`` and ``n_clusters``. Its clusters are also obs fields
+        (``standard:leiden_1.0`` ...) for :meth:`get_obs`, and its UMAP is
+        listed by :meth:`list_embeddings`.
+        """
+        return self._analysis(accession, "", sample_id)
+
+    def get_markers(
+        self,
+        accession: str,
+        sample_id: Optional[str] = None,
+        *,
+        resolution: float = 1.0,
+        cluster: Optional[str] = None,
+        limit: int = 10,
+    ):
+        """Marker genes of the standard pipeline's clusters at one resolution.
+
+        Wilcoxon, each cluster against all other spots. Returns a
+        :class:`pandas.DataFrame` with ``cluster``, ``rank``, ``gene``,
+        ``score``, ``log_fold_change``, ``pval_adj``, ``pct_in`` and
+        ``pct_out``: up to ``limit`` (at most 100) genes per cluster, or only
+        ``cluster``'s. Raises :class:`requests.HTTPError` 409 until the
+        sample's results exist.
+        """
+        import pandas as pd
+
+        data = self._analysis(
+            accession, "/markers", sample_id, resolution=resolution, cluster=cluster, limit=limit
+        )
+        return pd.DataFrame(data.get("markers", []))
+
+    def get_dotplot(
+        self, accession: str, sample_id: Optional[str] = None, *, resolution: float = 1.0
+    ):
+        """The top three markers of every cluster as a dot plot.
+
+        Returns ``(mean, fraction)``: two :class:`pandas.DataFrame` of genes x
+        clusters, the mean normalised value and the share of spots expressing.
+        """
+        import pandas as pd
+
+        data = self._analysis(accession, "/dotplot", sample_id, resolution=resolution)
+        frames = (
+            pd.DataFrame(
+                data.get(name, []), index=data.get("genes", []), columns=data.get("clusters", [])
+            )
+            for name in ("mean", "fraction")
+        )
+        return tuple(frames)
+
+    def get_spatially_variable_genes(
+        self,
+        accession: str,
+        sample_id: Optional[str] = None,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+    ):
+        """Genes ranked by Moran's I, precomputed on every spot by the standard
+        pipeline (no subsample, no wait). Returns a :class:`pandas.DataFrame`
+        with ``gene``, ``rank``, ``moran_i`` and ``pval_adj``. For an
+        on-demand run with other parameters, see :meth:`spatially_variable_genes`.
+        """
+        import pandas as pd
+
+        data = self._analysis(
+            accession, "/spatially-variable", sample_id, limit=limit, offset=offset
+        )
+        return pd.DataFrame(data.get("genes", []))
+
     def load_anndata(
         self,
         accession: str,
