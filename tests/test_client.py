@@ -3585,11 +3585,12 @@ def test_get_spatially_variable_genes(client):
         f"{ANALYSIS}/spatially-variable",
         json={"genes": [{"gene": "Pcp4", "rank": 1, "moran_i": 0.7, "pval_adj": 1e-9}]},
     )
-    df = client.get_spatially_variable_genes("STD0001", sample_id="4", limit=20, offset=20)
-    assert df["gene"].tolist() == ["Pcp4"]
-    assert (
-        "limit=20" in resp_lib.calls[0].request.url and "offset=20" in resp_lib.calls[0].request.url
+    df = client.get_spatially_variable_genes(
+        "STD0001", sample_id="4", rank_by="sparkx", limit=20, offset=20
     )
+    assert df["gene"].tolist() == ["Pcp4"]
+    url = resp_lib.calls[0].request.url
+    assert "rank_by=sparkx" in url and "limit=20" in url and "offset=20" in url
 
 
 # ---------------------------------------------------------------------------

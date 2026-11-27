@@ -678,18 +678,22 @@ class StomicsClient:
         accession: str,
         sample_id: Optional[str] = None,
         *,
+        rank_by: str = "consensus",
         limit: int = 50,
         offset: int = 0,
     ):
-        """Genes ranked by Moran's I, precomputed on every spot by the standard
-        pipeline (no subsample, no wait). Returns a :class:`pandas.DataFrame`
-        with ``gene``, ``rank``, ``moran_i`` and ``pval_adj``. For an
-        on-demand run with other parameters, see :meth:`spatially_variable_genes`.
+        """Spatially variable genes by Moran's I and SPARK-X, precomputed on
+        every spot by the standard pipeline.
+
+        ``rank_by`` is ``"consensus"`` (the mean of the two ranks), ``"moran"``
+        or ``"sparkx"``. Returns a :class:`pandas.DataFrame` with ``gene``,
+        ``rank`` (consensus), ``moran_i``, ``moran_rank``, ``sparkx_rank`` and
+        ``pval_adj`` (SPARK-X's Benjamini-Hochberg FDR).
         """
         import pandas as pd
 
         data = self._analysis(
-            accession, "/spatially-variable", sample_id, limit=limit, offset=offset
+            accession, "/spatially-variable", sample_id, rank_by=rank_by, limit=limit, offset=offset
         )
         return pd.DataFrame(data.get("genes", []))
 
@@ -1522,10 +1526,11 @@ class StomicsClient:
         n_top_genes: int = 50,
         min_expr_fraction: float = 0.1,
     ) -> SvgResult:
-        """Identify spatially variable genes for a sample using Moran's I.
+        """The top spatially variable genes of a sample by Moran's I.
 
-        Results are cached server-side for 24 hours; repeated calls with the
-        same parameters return almost instantly.
+        Read from the standard pipeline's results, computed in advance on every
+        spot, so it answers at once; :meth:`get_spatially_variable_genes` also
+        has SPARK-X.
 
         Parameters
         ----------

@@ -37,7 +37,7 @@ run = client.get_standard_analysis("STD0100", sample_id="12")
 clusters = client.get_obs("STD0100", "standard:leiden_1.0", sample_id="12")
 markers = client.get_markers("STD0100", sample_id="12", resolution=1.0)
 mean, fraction = client.get_dotplot("STD0100", sample_id="12")
-svgs = client.get_spatially_variable_genes("STD0100", sample_id="12", limit=20)
+svgs = client.get_spatially_variable_genes("STD0100", sample_id="12", rank_by="consensus", limit=20)
 
 # Files: filter by name, type or sample, or download them all, resuming if interrupted
 matrices = client.list_files("STD0716", q="GSM5", file_types=["expression_matrix"])
