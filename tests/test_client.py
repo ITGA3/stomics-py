@@ -3622,6 +3622,12 @@ def test_download_h5ad_and_load_sample(client, tmp_path, monkeypatch):
 
 
 @resp_lib.activate
+def test_get_portal_stats(client):
+    resp_lib.add(resp_lib.GET, f"{BASE}/api/v1/stats/portal", json={"datasets": 549})
+    assert client.get_portal_stats()["datasets"] == 549
+
+
+@resp_lib.activate
 def test_get_spatial_stats(client):
     url = f"{BASE}/api/v1/datasets/STD0001/analysis/spatial-stats"
     resp_lib.add(resp_lib.GET, url, json={"layer": "cell_type", "labels": ["T", "B"]})

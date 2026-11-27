@@ -692,6 +692,12 @@ class StomicsClient:
         )
         return pd.DataFrame(data.get("genes", []))
 
+    def get_portal_stats(self) -> dict:
+        """What stomics.io holds: published datasets, samples, spots and cells,
+        samples analysed, distinct technologies, organisms and tissues, and
+        datasets published per month (``growth``)."""
+        return self._get("/api/v1/stats/portal")
+
     def get_spatial_stats(
         self, accession: str, sample_id: Optional[str] = None, layer: Optional[str] = None
     ) -> dict:
