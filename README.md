@@ -39,6 +39,9 @@ markers = client.get_markers("STD0100", sample_id="12", resolution=1.0)
 mean, fraction = client.get_dotplot("STD0100", sample_id="12")
 svgs = client.get_spatially_variable_genes("STD0100", sample_id="12", rank_by="consensus", limit=20)
 
+# One sample as AnnData: counts, normalised layer, clusters, embeddings, positions, provenance
+adata = client.load_sample("STD0100", sample_id="12")
+
 # Files: filter by name, type or sample, or download them all, resuming if interrupted
 matrices = client.list_files("STD0716", q="GSM5", file_types=["expression_matrix"])
 client.download_dataset("STD0716", "./STD0716")

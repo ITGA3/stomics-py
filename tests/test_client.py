@@ -3593,6 +3593,34 @@ def test_get_spatially_variable_genes(client):
     assert "rank_by=sparkx" in url and "limit=20" in url and "offset=20" in url
 
 
+@resp_lib.activate
+def test_download_h5ad_and_load_sample(client, tmp_path, monkeypatch):
+    import anndata
+    import numpy as np
+
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    source = tmp_path / "src.h5ad"
+    anndata.AnnData(X=np.ones((2, 3), dtype=np.float32)).write_h5ad(source)
+    resp_lib.add(
+        resp_lib.GET,
+        f"{ANALYSIS}/h5ad",
+        json={"url": "https://s3.example.com/sample.h5ad", "filename": "STD0001_sample_4.h5ad"},
+    )
+    resp_lib.add(resp_lib.GET, "https://s3.example.com/sample.h5ad", body=source.read_bytes())
+    dest = tmp_path / "out.h5ad"
+    assert client.download_h5ad("STD0001", str(dest), sample_id="4", show_progress=False) == str(
+        dest
+    )
+    assert "sample_id=4" in resp_lib.calls[0].request.url
+
+    adata = client.load_sample("STD0001", sample_id="4")
+    assert adata.shape == (2, 3)
+    calls = len(resp_lib.calls)
+    client.load_sample("STD0001", sample_id="4")  # cached: no new requests
+    assert len(resp_lib.calls) == calls
+    assert client.load_sample("STD0001").shape == (2, 3)  # the dataset-level file
+
+
 # ---------------------------------------------------------------------------
 # Team logos
 # ---------------------------------------------------------------------------

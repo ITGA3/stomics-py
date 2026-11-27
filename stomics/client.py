@@ -697,6 +697,49 @@ class StomicsClient:
         )
         return pd.DataFrame(data.get("genes", []))
 
+    def download_h5ad(
+        self,
+        accession: str,
+        dest_path: str,
+        sample_id: Optional[str] = None,
+        show_progress: bool = True,
+    ) -> str:
+        """Download one sample as an ``.h5ad`` with everything stomics.io knows about it.
+
+        Raw counts in ``X`` (values as submitted when they were not counts),
+        ``layers["log1p_cp10k"]``, every submitted and QC column plus the
+        standard pipeline's clusters in ``obs``, positions in
+        ``obsm["spatial"]`` with every embedding, spatially variable gene
+        statistics in ``var`` and provenance in ``uns["stomics"]``. Returns
+        ``dest_path``. Raises :class:`requests.HTTPError` 409 until the
+        sample has been analysed.
+        """
+        params = {"sample_id": sample_id} if sample_id is not None else None
+        data = self._get(f"/api/v1/datasets/{accession}/analysis/standard/h5ad", params=params)
+        self._stream_to_disk(data["url"], dest_path, show_progress=show_progress)
+        return dest_path
+
+    def load_sample(self, accession: str, sample_id: Optional[str] = None):
+        """One sample as an :class:`anndata.AnnData`, ready for scanpy and squidpy.
+
+        Downloads it with :meth:`download_h5ad` into
+        ``~/.stomics/cache/{accession}/`` (reusing a previous download) and
+        reads it. Requires ``anndata`` (``pip install "stomics[anndata]"``).
+        """
+        try:
+            import anndata
+        except ImportError as exc:  # pragma: no cover - exercised via the import guard test
+            raise ImportError(
+                'anndata is required for load_sample(); pip install "stomics[anndata]"'
+            ) from exc
+        name = (
+            f"{accession}_sample_{sample_id}.h5ad" if sample_id is not None else f"{accession}.h5ad"
+        )
+        path = stomics_io.ensure_cache_dir(accession) / name
+        if not path.exists():
+            self.download_h5ad(accession, str(path), sample_id=sample_id, show_progress=False)
+        return anndata.read_h5ad(path)
+
     def load_anndata(
         self,
         accession: str,
