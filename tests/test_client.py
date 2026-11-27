@@ -3621,6 +3621,33 @@ def test_download_h5ad_and_load_sample(client, tmp_path, monkeypatch):
     assert client.load_sample("STD0001").shape == (2, 3)  # the dataset-level file
 
 
+@resp_lib.activate
+def test_saved_views(client):
+    view = {"slug": "abc123", "url": "https://stomics.io/v/abc123"}
+    resp_lib.add(resp_lib.POST, f"{BASE}/api/v1/views", json=view, status=201)
+    resp_lib.add(resp_lib.GET, f"{BASE}/api/v1/views/abc123", json=view)
+    resp_lib.add(resp_lib.GET, f"{BASE}/api/v1/datasets/STD0001/views", json={"items": [view]})
+    assert (
+        client.save_view("STD0001", {"v": 1, "g": ["Gfap"]}, sample_id=4, title="A")["slug"]
+        == "abc123"
+    )
+    import json as _json
+
+    assert _json.loads(resp_lib.calls[0].request.body) == {
+        "accession": "STD0001",
+        "state": {"v": 1, "g": ["Gfap"]},
+        "sample_id": 4,
+        "title": "A",
+    }
+    client.save_view("STD0001", {"v": 1, "g": ["Gfap"]})
+    assert _json.loads(resp_lib.calls[1].request.body) == {
+        "accession": "STD0001",
+        "state": {"v": 1, "g": ["Gfap"]},
+    }
+    assert client.get_view("abc123") == view
+    assert client.list_views("STD0001") == [view]
+
+
 # ---------------------------------------------------------------------------
 # Team logos
 # ---------------------------------------------------------------------------

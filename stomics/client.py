@@ -740,6 +740,41 @@ class StomicsClient:
             self.download_h5ad(accession, str(path), sample_id=sample_id, show_progress=False)
         return anndata.read_h5ad(path)
 
+    # ------------------------------------------------------------------
+    # Saved views of the spatial viewer
+    # ------------------------------------------------------------------
+
+    def save_view(
+        self,
+        accession: str,
+        state: dict,
+        sample_id: Optional[int] = None,
+        title: Optional[str] = None,
+    ) -> dict:
+        """Save a view of the spatial viewer and return it, with its short link
+        (``url``) and embed (``embed_url``). Requires an API key.
+
+        ``state`` is the viewer's state, version 1: ``g`` genes (required, up
+        to four), and optionally ``s`` sample id, ``c`` colour mode, ``m``
+        metadata field, ``p`` palette, ``sc`` colour range and ``z`` zoom.
+        """
+        body: dict = {"accession": accession, "state": state}
+        if sample_id is not None:
+            body["sample_id"] = sample_id
+        if title is not None:
+            body["title"] = title
+        resp = self._session.post(f"{self.base_url}/api/v1/views", json=body)
+        resp.raise_for_status()
+        return resp.json()
+
+    def get_view(self, slug: str) -> dict:
+        """A saved view by its slug (the last part of its short link)."""
+        return self._get(f"/api/v1/views/{slug}")
+
+    def list_views(self, accession: str) -> list[dict]:
+        """A dataset's saved views, featured first, then the newest."""
+        return self._get(f"/api/v1/datasets/{accession}/views").get("items", [])
+
     def load_anndata(
         self,
         accession: str,
