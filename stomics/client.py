@@ -697,6 +697,22 @@ class StomicsClient:
         )
         return pd.DataFrame(data.get("genes", []))
 
+    def get_spatial_stats(
+        self, accession: str, sample_id: Optional[str] = None, layer: Optional[str] = None
+    ) -> dict:
+        """Which labels sit together: neighbourhood enrichment, co-occurrence
+        and Ripley's L of one labelled layer (the first unless ``layer`` names
+        one). Returns the response dict: ``labels``, ``zscore`` and ``counts``
+        (labels x labels), ``distances``, ``cooccurrence[a][b][d]`` and
+        ``ripley[label][d]``; ``layers`` lists every analysed layer."""
+        return self._analysis_path(accession, "spatial-stats", sample_id, layer=layer)
+
+    def _analysis_path(self, accession: str, path: str, sample_id, **params) -> dict:
+        query = {k: v for k, v in params.items() if v is not None}
+        if sample_id is not None:
+            query["sample_id"] = sample_id
+        return self._get(f"/api/v1/datasets/{accession}/analysis/{path}", params=query or None)
+
     def download_h5ad(
         self,
         accession: str,

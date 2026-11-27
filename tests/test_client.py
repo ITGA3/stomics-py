@@ -3622,6 +3622,22 @@ def test_download_h5ad_and_load_sample(client, tmp_path, monkeypatch):
 
 
 @resp_lib.activate
+def test_get_spatial_stats(client):
+    url = f"{BASE}/api/v1/datasets/STD0001/analysis/spatial-stats"
+    resp_lib.add(resp_lib.GET, url, json={"layer": "cell_type", "labels": ["T", "B"]})
+    assert (
+        client.get_spatial_stats("STD0001", sample_id="4", layer="cell_type")["layer"]
+        == "cell_type"
+    )
+    assert (
+        "layer=cell_type" in resp_lib.calls[0].request.url
+        and "sample_id=4" in resp_lib.calls[0].request.url
+    )
+    client.get_spatial_stats("STD0001")
+    assert resp_lib.calls[1].request.url == url
+
+
+@resp_lib.activate
 def test_saved_views(client):
     view = {"slug": "abc123", "url": "https://stomics.io/v/abc123"}
     resp_lib.add(resp_lib.POST, f"{BASE}/api/v1/views", json=view, status=201)
