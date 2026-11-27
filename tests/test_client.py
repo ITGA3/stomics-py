@@ -3522,6 +3522,154 @@ def test_get_obs_categorical_and_numeric(client):
 
 
 # ---------------------------------------------------------------------------
+# The standard analysis pipeline
+# ---------------------------------------------------------------------------
+
+ANALYSIS = f"{BASE}/api/v1/datasets/STD0001/analysis/standard"
+
+
+@resp_lib.activate
+def test_get_standard_analysis(client):
+    resp_lib.add(resp_lib.GET, ANALYSIS, json={"status": "ready", "resolutions": [1.0]})
+    assert client.get_standard_analysis("STD0001")["status"] == "ready"
+    client.get_standard_analysis("STD0001", sample_id="4")
+    assert resp_lib.calls[0].request.url == ANALYSIS
+    assert resp_lib.calls[1].request.url.endswith("?sample_id=4")
+
+
+@resp_lib.activate
+def test_get_markers(client):
+    marker = {
+        "cluster": "0",
+        "rank": 1,
+        "gene": "Gfap",
+        "score": 9.0,
+        "log_fold_change": 2.0,
+        "pval_adj": 0.001,
+        "pct_in": 0.9,
+        "pct_out": 0.1,
+    }
+    resp_lib.add(resp_lib.GET, f"{ANALYSIS}/markers", json={"markers": [marker]})
+    df = client.get_markers("STD0001", sample_id="4", resolution=0.6, cluster="0", limit=5)
+    assert df["gene"].tolist() == ["Gfap"]
+    url = resp_lib.calls[0].request.url
+    assert (
+        "resolution=0.6" in url and "cluster=0" in url and "limit=5" in url and "sample_id=4" in url
+    )
+    client.get_markers("STD0001")
+    assert "cluster" not in resp_lib.calls[1].request.url
+
+
+@resp_lib.activate
+def test_get_dotplot(client):
+    resp_lib.add(
+        resp_lib.GET,
+        f"{ANALYSIS}/dotplot",
+        json={
+            "genes": ["Gfap"],
+            "clusters": ["0", "1"],
+            "mean": [[2.0, 0.1]],
+            "fraction": [[0.9, 0.2]],
+        },
+    )
+    mean, fraction = client.get_dotplot("STD0001", resolution=1.5)
+    assert mean.loc["Gfap", "0"] == 2.0
+    assert fraction.loc["Gfap", "1"] == 0.2
+    assert "resolution=1.5" in resp_lib.calls[0].request.url
+
+
+@resp_lib.activate
+def test_get_spatially_variable_genes(client):
+    resp_lib.add(
+        resp_lib.GET,
+        f"{ANALYSIS}/spatially-variable",
+        json={"genes": [{"gene": "Pcp4", "rank": 1, "moran_i": 0.7, "pval_adj": 1e-9}]},
+    )
+    df = client.get_spatially_variable_genes(
+        "STD0001", sample_id="4", rank_by="sparkx", limit=20, offset=20
+    )
+    assert df["gene"].tolist() == ["Pcp4"]
+    url = resp_lib.calls[0].request.url
+    assert "rank_by=sparkx" in url and "limit=20" in url and "offset=20" in url
+
+
+@resp_lib.activate
+def test_download_h5ad_and_load_sample(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    resp_lib.add(
+        resp_lib.GET,
+        f"{ANALYSIS}/h5ad",
+        json={"url": "https://s3.example.com/sample.h5ad", "filename": "STD0001_sample_4.h5ad"},
+    )
+    resp_lib.add(resp_lib.GET, "https://s3.example.com/sample.h5ad", body=b"HDF")
+    dest = tmp_path / "out.h5ad"
+    assert client.download_h5ad("STD0001", str(dest), sample_id="4", show_progress=False) == str(
+        dest
+    )
+    assert dest.read_bytes() == b"HDF"
+    assert "sample_id=4" in resp_lib.calls[0].request.url
+
+    # anndata is optional: a stand-in reads what was downloaded.
+    mock_ad = MagicMock()
+    mock_ad.read_h5ad.side_effect = lambda path: ("adata", Path(path).name)
+    with patch.dict("sys.modules", {"anndata": mock_ad}):
+        assert client.load_sample("STD0001", sample_id="4") == ("adata", "STD0001_sample_4.h5ad")
+        calls = len(resp_lib.calls)
+        client.load_sample("STD0001", sample_id="4")  # cached: no new requests
+        assert len(resp_lib.calls) == calls
+        assert client.load_sample("STD0001") == ("adata", "STD0001.h5ad")
+
+
+@resp_lib.activate
+def test_get_portal_stats(client):
+    resp_lib.add(resp_lib.GET, f"{BASE}/api/v1/stats/portal", json={"datasets": 549})
+    assert client.get_portal_stats()["datasets"] == 549
+
+
+@resp_lib.activate
+def test_get_spatial_stats(client):
+    url = f"{BASE}/api/v1/datasets/STD0001/analysis/spatial-stats"
+    resp_lib.add(resp_lib.GET, url, json={"layer": "cell_type", "labels": ["T", "B"]})
+    assert (
+        client.get_spatial_stats("STD0001", sample_id="4", layer="cell_type")["layer"]
+        == "cell_type"
+    )
+    assert (
+        "layer=cell_type" in resp_lib.calls[0].request.url
+        and "sample_id=4" in resp_lib.calls[0].request.url
+    )
+    client.get_spatial_stats("STD0001")
+    assert resp_lib.calls[1].request.url == url
+
+
+@resp_lib.activate
+def test_saved_views(client):
+    view = {"slug": "abc123", "url": "https://stomics.io/v/abc123"}
+    resp_lib.add(resp_lib.POST, f"{BASE}/api/v1/views", json=view, status=201)
+    resp_lib.add(resp_lib.GET, f"{BASE}/api/v1/views/abc123", json=view)
+    resp_lib.add(resp_lib.GET, f"{BASE}/api/v1/datasets/STD0001/views", json={"items": [view]})
+    assert (
+        client.save_view("STD0001", {"v": 1, "g": ["Gfap"]}, sample_id=4, title="A")["slug"]
+        == "abc123"
+    )
+    import json as _json
+
+    assert _json.loads(resp_lib.calls[0].request.body) == {
+        "accession": "STD0001",
+        "state": {"v": 1, "g": ["Gfap"]},
+        "sample_id": 4,
+        "title": "A",
+    }
+    client.save_view("STD0001", {"v": 1, "g": ["Gfap"]})
+    assert _json.loads(resp_lib.calls[1].request.body) == {
+        "accession": "STD0001",
+        "state": {"v": 1, "g": ["Gfap"]},
+    }
+    assert client.get_view("abc123") == view
+    assert client.list_views("STD0001") == [view]
+
+
+# ---------------------------------------------------------------------------
 # Team logos
 # ---------------------------------------------------------------------------
 

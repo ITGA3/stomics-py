@@ -605,6 +605,193 @@ class StomicsClient:
             values = [float("nan") if v is None else v for v in values]
         return pd.DataFrame({"barcode": data.get("barcodes", []), key: values})
 
+    # ------------------------------------------------------------------
+    # The standard analysis pipeline
+    # ------------------------------------------------------------------
+
+    def _analysis(self, accession: str, path: str, sample_id, **params) -> dict:
+        return self._analysis_path(accession, f"standard{path}", sample_id, **params)
+
+    def get_standard_analysis(self, accession: str, sample_id: Optional[str] = None) -> dict:
+        """Whether a sample has results from the stomics.io standard pipeline.
+
+        Returns a dict with ``status`` (``ready``, ``not_run``, ``pending``,
+        ``running``, ``failed`` or ``unsupported``, with ``error``) and, when
+        ready, ``provenance`` (method, version, parameters, when it ran),
+        ``resolutions`` and ``n_clusters``. Its clusters are also obs fields
+        (``standard:leiden_1.0`` ...) for :meth:`get_obs`, and its UMAP is
+        listed by :meth:`list_embeddings`.
+        """
+        return self._analysis(accession, "", sample_id)
+
+    def get_markers(
+        self,
+        accession: str,
+        sample_id: Optional[str] = None,
+        *,
+        resolution: float = 1.0,
+        cluster: Optional[str] = None,
+        limit: int = 10,
+    ):
+        """Marker genes of the standard pipeline's clusters at one resolution.
+
+        Wilcoxon, each cluster against all other spots. Returns a
+        :class:`pandas.DataFrame` with ``cluster``, ``rank``, ``gene``,
+        ``score``, ``log_fold_change``, ``pval_adj``, ``pct_in`` and
+        ``pct_out``: up to ``limit`` (at most 100) genes per cluster, or only
+        ``cluster``'s. Raises :class:`requests.HTTPError` 409 until the
+        sample's results exist.
+        """
+        import pandas as pd
+
+        data = self._analysis(
+            accession, "/markers", sample_id, resolution=resolution, cluster=cluster, limit=limit
+        )
+        return pd.DataFrame(data.get("markers", []))
+
+    def get_dotplot(
+        self, accession: str, sample_id: Optional[str] = None, *, resolution: float = 1.0
+    ):
+        """The top three markers of every cluster as a dot plot.
+
+        Returns ``(mean, fraction)``: two :class:`pandas.DataFrame` of genes x
+        clusters, the mean normalised value and the share of spots expressing.
+        """
+        import pandas as pd
+
+        data = self._analysis(accession, "/dotplot", sample_id, resolution=resolution)
+        frames = (
+            pd.DataFrame(
+                data.get(name, []), index=data.get("genes", []), columns=data.get("clusters", [])
+            )
+            for name in ("mean", "fraction")
+        )
+        return tuple(frames)
+
+    def get_spatially_variable_genes(
+        self,
+        accession: str,
+        sample_id: Optional[str] = None,
+        *,
+        rank_by: str = "consensus",
+        limit: int = 50,
+        offset: int = 0,
+    ):
+        """Spatially variable genes by Moran's I and SPARK-X, precomputed on
+        every spot by the standard pipeline.
+
+        ``rank_by`` is ``"consensus"`` (the mean of the two ranks), ``"moran"``
+        or ``"sparkx"``. Returns a :class:`pandas.DataFrame` with ``gene``,
+        ``rank`` (consensus), ``moran_i``, ``moran_rank``, ``sparkx_rank`` and
+        ``pval_adj`` (SPARK-X's Benjamini-Hochberg FDR).
+        """
+        import pandas as pd
+
+        data = self._analysis(
+            accession, "/spatially-variable", sample_id, rank_by=rank_by, limit=limit, offset=offset
+        )
+        return pd.DataFrame(data.get("genes", []))
+
+    def get_portal_stats(self) -> dict:
+        """What stomics.io holds: published datasets, samples, spots and cells,
+        samples analysed, distinct technologies, organisms and tissues, and
+        datasets published per month (``growth``)."""
+        return self._get("/api/v1/stats/portal")
+
+    def get_spatial_stats(
+        self, accession: str, sample_id: Optional[str] = None, layer: Optional[str] = None
+    ) -> dict:
+        """Which labels sit together: neighbourhood enrichment, co-occurrence
+        and Ripley's L of one labelled layer (the first unless ``layer`` names
+        one). Returns the response dict: ``labels``, ``zscore`` and ``counts``
+        (labels x labels), ``distances``, ``cooccurrence[a][b][d]`` and
+        ``ripley[label][d]``; ``layers`` lists every analysed layer."""
+        return self._analysis_path(accession, "spatial-stats", sample_id, layer=layer)
+
+    def _analysis_path(self, accession: str, path: str, sample_id, **params) -> dict:
+        query = {k: v for k, v in params.items() if v is not None}
+        if sample_id is not None:
+            query["sample_id"] = sample_id
+        return self._get(f"/api/v1/datasets/{accession}/analysis/{path}", params=query or None)
+
+    def download_h5ad(
+        self,
+        accession: str,
+        dest_path: str,
+        sample_id: Optional[str] = None,
+        show_progress: bool = True,
+    ) -> str:
+        """Download one sample as an ``.h5ad`` with everything stomics.io knows about it.
+
+        Raw counts in ``X`` (values as submitted when they were not counts),
+        ``layers["log1p_cp10k"]``, every submitted and QC column plus the
+        standard pipeline's clusters in ``obs``, positions in
+        ``obsm["spatial"]`` with every embedding, spatially variable gene
+        statistics in ``var`` and provenance in ``uns["stomics"]``. Returns
+        ``dest_path``. Raises :class:`requests.HTTPError` 409 until the
+        sample has been analysed.
+        """
+        params = {"sample_id": sample_id} if sample_id is not None else None
+        data = self._get(f"/api/v1/datasets/{accession}/analysis/standard/h5ad", params=params)
+        self._stream_to_disk(data["url"], dest_path, show_progress=show_progress)
+        return dest_path
+
+    def load_sample(self, accession: str, sample_id: Optional[str] = None):
+        """One sample as an :class:`anndata.AnnData`, ready for scanpy and squidpy.
+
+        Downloads it with :meth:`download_h5ad` into
+        ``~/.stomics/cache/{accession}/`` (reusing a previous download) and
+        reads it. Requires ``anndata`` (``pip install "stomics[anndata]"``).
+        """
+        try:
+            import anndata
+        except ImportError as exc:  # pragma: no cover - exercised via the import guard test
+            raise ImportError(
+                'anndata is required for load_sample(); pip install "stomics[anndata]"'
+            ) from exc
+        name = (
+            f"{accession}_sample_{sample_id}.h5ad" if sample_id is not None else f"{accession}.h5ad"
+        )
+        path = stomics_io.ensure_cache_dir(accession) / name
+        if not path.exists():
+            self.download_h5ad(accession, str(path), sample_id=sample_id, show_progress=False)
+        return anndata.read_h5ad(path)
+
+    # ------------------------------------------------------------------
+    # Saved views of the spatial viewer
+    # ------------------------------------------------------------------
+
+    def save_view(
+        self,
+        accession: str,
+        state: dict,
+        sample_id: Optional[int] = None,
+        title: Optional[str] = None,
+    ) -> dict:
+        """Save a view of the spatial viewer and return it, with its short link
+        (``url``) and embed (``embed_url``). Requires an API key.
+
+        ``state`` is the viewer's state, version 1: ``g`` genes (required, up
+        to four), and optionally ``s`` sample id, ``c`` colour mode, ``m``
+        metadata field, ``p`` palette, ``sc`` colour range and ``z`` zoom.
+        """
+        body: dict = {"accession": accession, "state": state}
+        if sample_id is not None:
+            body["sample_id"] = sample_id
+        if title is not None:
+            body["title"] = title
+        resp = self._session.post(f"{self.base_url}/api/v1/views", json=body)
+        resp.raise_for_status()
+        return resp.json()
+
+    def get_view(self, slug: str) -> dict:
+        """A saved view by its slug (the last part of its short link)."""
+        return self._get(f"/api/v1/views/{slug}")
+
+    def list_views(self, accession: str) -> list[dict]:
+        """A dataset's saved views, featured first, then the newest."""
+        return self._get(f"/api/v1/datasets/{accession}/views").get("items", [])
+
     def load_anndata(
         self,
         accession: str,
@@ -1434,10 +1621,11 @@ class StomicsClient:
         n_top_genes: int = 50,
         min_expr_fraction: float = 0.1,
     ) -> SvgResult:
-        """Identify spatially variable genes for a sample using Moran's I.
+        """The top spatially variable genes of a sample by Moran's I.
 
-        Results are cached server-side for 24 hours; repeated calls with the
-        same parameters return almost instantly.
+        Read from the standard pipeline's results, computed in advance on every
+        spot, so it answers at once; :meth:`get_spatially_variable_genes` also
+        has SPARK-X.
 
         Parameters
         ----------
